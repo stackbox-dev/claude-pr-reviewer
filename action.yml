@@ -32,6 +32,11 @@ inputs:
     required: false
     default: ''
 
+  pr_number:
+    description: 'PR number to review (required for workflow_dispatch; auto-detected for pull_request and issue_comment events)'
+    required: false
+    default: ''
+
   allowed_tools:
     description: 'Tools allowed for Claude to use'
     required: false
@@ -58,7 +63,7 @@ runs:
           pr-review-toolkit@claude-code-plugins
         prompt: |
           REPO: ${{ github.repository }}
-          PR NUMBER: ${{ github.event.pull_request.number }}
+          PR NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
           REVIEW LANGUAGE: ${{ inputs.review_language }}
 
           Please review this PR comprehensively.
@@ -90,7 +95,7 @@ runs:
           pr-review-toolkit@claude-code-plugins
         prompt: |
           REPO: ${{ github.repository }}
-          PR NUMBER: ${{ github.event.pull_request.number }}
+          PR NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
           REVIEW LANGUAGE: ${{ inputs.review_language }}
 
           Please review this PR comprehensively.
