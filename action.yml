@@ -42,6 +42,11 @@ inputs:
     required: false
     default: 'Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob'
 
+  claude_args:
+    description: 'Additional arguments to pass to Claude Code (e.g. --verbose, --max-turns 10)'
+    required: false
+    default: ''
+
 runs:
   using: 'composite'
   steps:
@@ -62,25 +67,16 @@ runs:
         plugins: |
           pr-review-toolkit@claude-code-plugins
         prompt: |
+          /pr-review-toolkit:review-pr
           REPO: ${{ github.repository }}
           PR NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
-          REVIEW LANGUAGE: ${{ inputs.review_language }}
-
-          Please review this PR comprehensively.
-          Use the pr-review-toolkit agents to check:
-          - Code quality and style (code-reviewer)
-          - Test coverage (pr-test-analyzer)
-          - Error handling (silent-failure-hunter)
-          - Type design (type-design-analyzer)
-          - Comment accuracy (comment-analyzer)
 
           ${{ inputs.custom_prompt }}
 
           Post review results as a PR comment using `gh pr comment`.
-          Use `gh pr review` for inline comments on specific code lines.
-          Write all reviews in ${{ inputs.review_language }}.
         claude_args: |
           --allowedTools "${{ inputs.allowed_tools }}"
+          ${{ inputs.claude_args }}
 
     - name: Run Claude PR Review (API Key)
       if: ${{ inputs.anthropic_api_key != '' && inputs.claude_code_oauth_token == '' }}
@@ -94,22 +90,13 @@ runs:
         plugins: |
           pr-review-toolkit@claude-code-plugins
         prompt: |
+          /pr-review-toolkit:review-pr
           REPO: ${{ github.repository }}
           PR NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
-          REVIEW LANGUAGE: ${{ inputs.review_language }}
-
-          Please review this PR comprehensively.
-          Use the pr-review-toolkit agents to check:
-          - Code quality and style (code-reviewer)
-          - Test coverage (pr-test-analyzer)
-          - Error handling (silent-failure-hunter)
-          - Type design (type-design-analyzer)
-          - Comment accuracy (comment-analyzer)
 
           ${{ inputs.custom_prompt }}
 
           Post review results as a PR comment using `gh pr comment`.
-          Use `gh pr review` for inline comments on specific code lines.
-          Write all reviews in ${{ inputs.review_language }}.
         claude_args: |
           --allowedTools "${{ inputs.allowed_tools }}"
+          ${{ inputs.claude_args }}
