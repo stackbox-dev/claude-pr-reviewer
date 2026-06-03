@@ -128,6 +128,7 @@ jobs:
 | `allowed_tools` | No | (see below) | Tools allowed for Claude |
 | `claude_args` | No | - | Additional arguments to pass to Claude Code (e.g. `--verbose`, `--max-turns 10`) |
 | `show_full_output` | No | `false` | Log Claude Code's full JSON output (all messages and tool results) to the Actions log for debugging. See warning below |
+| `claude_md_inject` | No | - | Space-separated list of files to append to `CLAUDE.md` before the review runs. Files that do not exist are silently skipped |
 
 \* Either `claude_code_oauth_token` or `anthropic_api_key` is required. If both are provided, `claude_code_oauth_token` takes precedence.
 
@@ -225,6 +226,17 @@ Set `show_full_output: true` to stream Claude Code's full JSON output — every 
 
 > [!WARNING]
 > `show_full_output` logs **all** Claude messages, including tool execution results, which may contain secrets, API keys, or other sensitive information. Anyone who can read the workflow logs (including the public on open-source repositories) can see this output. Enable it only for temporary debugging, and keep the default (`false`) for normal runs.
+
+### Inject Custom Review Instructions
+
+Use `claude_md_inject` to append project-specific review guidelines from files in your repo into `CLAUDE.md` before the review runs. Files that do not exist are silently skipped.
+
+```yaml
+- uses: drillan/claude-pr-reviewer@v1
+  with:
+    claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    claude_md_inject: .github/review-guidelines.md .github/CODE_REVIEW.md
+```
 
 ### Avoid Repeated Reviews
 
