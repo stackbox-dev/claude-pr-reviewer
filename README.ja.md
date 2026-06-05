@@ -122,6 +122,7 @@ jobs:
 | `claude_code_oauth_token` | No* | - | Claude Code OAuth トークン |
 | `anthropic_api_key` | No* | - | Anthropic API キー |
 | `anthropic_model` | No | `claude-opus-4-5-20251101` | 使用する Claude モデル |
+| `anthropic_base_url` | No | - | Anthropic API のベース URL。独自のゲートウェイ経由でリクエストを送信する場合に設定します（例: `https://gateway.example.com`）。空の場合はデフォルトの Anthropic エンドポイントを使用します |
 | `review_language` | No | `English` | レビューコメントの言語 |
 | `custom_prompt` | No | - | カスタム指示（追加プロンプト） |
 | `allowed_tools` | No | (後述) | Claude が使用可能なツール |
