@@ -22,6 +22,11 @@ inputs:
     required: false
     default: 'claude-opus-4-5-20251101'
 
+  anthropic_base_url:
+    description: 'Override the Anthropic API base URL to route requests through your own gateway (e.g. https://gateway.example.com). Leave empty to use the default Anthropic endpoint.'
+    required: false
+    default: ''
+
   review_language:
     description: 'Language for review comments (e.g., English, Japanese)'
     required: false
@@ -77,6 +82,7 @@ runs:
       uses: anthropics/claude-code-action@v1
       env:
         ANTHROPIC_MODEL: ${{ inputs.anthropic_model }}
+        ANTHROPIC_BASE_URL: ${{ inputs.anthropic_base_url }}
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
         plugin_marketplaces: |
@@ -101,6 +107,7 @@ runs:
       uses: anthropics/claude-code-action@v1
       env:
         ANTHROPIC_MODEL: ${{ inputs.anthropic_model }}
+        ANTHROPIC_BASE_URL: ${{ inputs.anthropic_base_url }}
       with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         plugin_marketplaces: |

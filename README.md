@@ -122,6 +122,7 @@ jobs:
 | `claude_code_oauth_token` | No* | - | Claude Code OAuth token |
 | `anthropic_api_key` | No* | - | Anthropic API key |
 | `anthropic_model` | No | `claude-opus-4-5-20251101` | Claude model to use |
+| `anthropic_base_url` | No | - | Anthropic API base URL. Set to route requests through your own gateway (e.g. `https://gateway.example.com`); leave empty to use the default Anthropic endpoint |
 | `review_language` | No | `English` | Language for review comments |
 | `custom_prompt` | No | - | Additional custom instructions |
 | `pr_number` | No | - | PR number to review (required for `workflow_dispatch`; auto-detected for `pull_request` and `issue_comment` events) |
