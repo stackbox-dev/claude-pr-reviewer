@@ -1,5 +1,5 @@
 name: 'Claude PR Reviewer'
-description: 'Automated PR review using Claude AI with pr-review-toolkit plugin'
+description: 'Automated PR review using Claude AI'
 author: 'drillan'
 
 branding:
@@ -18,9 +18,9 @@ inputs:
     default: ''
 
   anthropic_model:
-    description: 'Claude model to use (e.g., claude-opus-4-5-20251101, claude-sonnet-4-5-20250514)'
+    description: 'Claude model to use (e.g., claude-opus-4-8, claude-sonnet-4-5-20250514)'
     required: false
-    default: 'claude-opus-4-5-20251101'
+    default: 'claude-opus-4-8'
 
   anthropic_base_url:
     description: 'Override the Anthropic API base URL to route requests through your own gateway (e.g. https://gateway.example.com). Leave empty to use the default Anthropic endpoint.'
@@ -33,7 +33,7 @@ inputs:
     default: 'English'
 
   custom_prompt:
-    description: 'Additional custom instructions for the review'
+    description: 'Additional custom instructions for the review (e.g. repo-specific out-of-scope items)'
     required: false
     default: ''
 
@@ -42,10 +42,33 @@ inputs:
     required: false
     default: ''
 
+  review_mode:
+    description: >-
+      'inline' = finder/verifier subagents, terse inline PR review comments,
+      diff precompute + size cap. 'toolkit' = pr-review-toolkit plugin with a
+      single summary comment (legacy behavior).
+    required: false
+    default: 'toolkit'
+
+  max_diff_lines:
+    description: 'inline mode: skip auto-review above this diff line count (0 = no cap). workflow_dispatch runs always proceed.'
+    required: false
+    default: '1500'
+
+  effort:
+    description: 'inline mode: reasoning effort passed to Claude Code'
+    required: false
+    default: 'low'
+
+  max_turns:
+    description: 'inline mode: turn cap passed to Claude Code'
+    required: false
+    default: '30'
+
   allowed_tools:
     description: 'Tools allowed for Claude to use'
     required: false
-    default: 'Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh pr diff:*),Bash(gh pr view:*),Read,Grep,Glob'
+    default: 'Task,Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr review:*),Bash(gh api:*),Bash(gh pr comment:*)'
 
   claude_args:
     description: 'Additional arguments to pass to Claude Code (e.g. --verbose, --max-turns 10)'
@@ -77,38 +100,58 @@ runs:
           [ -f "$f" ] && cat "$f" >> CLAUDE.md
         done
 
-    - name: Run Claude PR Review (OAuth Token)
-      if: ${{ inputs.claude_code_oauth_token != '' }}
+    - name: Resolve PR number
+      id: pr
+      shell: bash
+      run: echo "number=${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+
+    # inline mode: precompute the diff + head SHA so the model never runs git
+    # to fetch the diff — denied-command flailing is the main cost driver.
+    # It just reads ./pr-review.diff.
+    - name: Precompute PR diff
+      id: diff
+      if: ${{ inputs.review_mode == 'inline' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.pr.outputs.number }}
+      run: |
+        # Non-PR events land on the default branch; move to the PR head so
+        # the reviewer's file Reads see PR content.
+        [ "${{ github.event_name }}" = "pull_request" ] || gh pr checkout "$PR_NUMBER"
+        gh pr diff "$PR_NUMBER" > pr-review.diff
+        echo "head_sha=$(gh pr view "$PR_NUMBER" --json headRefOid -q .headRefOid)" >> "$GITHUB_OUTPUT"
+        LINES=$(wc -l < pr-review.diff | tr -d '[:space:]')
+        echo "Diff for PR #${PR_NUMBER}: ${LINES} lines"
+        echo "lines=${LINES}" >> "$GITHUB_OUTPUT"
+
+    # Skip auto-review on huge diffs — cost balloons and review quality
+    # drops. workflow_dispatch always runs (manual override).
+    - name: Gate on diff size
+      id: gate
+      if: ${{ inputs.review_mode == 'inline' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PR_NUMBER: ${{ steps.pr.outputs.number }}
+        LINES: ${{ steps.diff.outputs.lines }}
+        CAP: ${{ inputs.max_diff_lines }}
+      run: |
+        if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "$CAP" -gt 0 ] && [ "$LINES" -gt "$CAP" ]; then
+          gh pr comment "$PR_NUMBER" --body "⏭️ Claude review skipped — diff too large (${LINES} lines). Trigger manually via workflow_dispatch if needed."
+          echo "run=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "run=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Claude review (toolkit mode)
+      if: ${{ inputs.review_mode == 'toolkit' }}
       uses: anthropics/claude-code-action@v1
       env:
         ANTHROPIC_MODEL: ${{ inputs.anthropic_model }}
         ANTHROPIC_BASE_URL: ${{ inputs.anthropic_base_url }}
       with:
         claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
-        plugin_marketplaces: |
-          https://github.com/anthropics/claude-code.git
-        plugins: |
-          pr-review-toolkit@claude-code-plugins
-        show_full_output: ${{ inputs.show_full_output }}
-        prompt: |
-          /pr-review-toolkit:review-pr
-          REPO: ${{ github.repository }}
-          PR NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
-
-          ${{ inputs.custom_prompt }}
-
-          Post review results as a PR comment using `gh pr comment`.
-        claude_args: |
-          --allowedTools "${{ inputs.allowed_tools }}"
-          ${{ inputs.claude_args }}
-
-    - name: Run Claude PR Review (API Key)
-      if: ${{ inputs.anthropic_api_key != '' && inputs.claude_code_oauth_token == '' }}
-      uses: anthropics/claude-code-action@v1
-      env:
-        ANTHROPIC_MODEL: ${{ inputs.anthropic_model }}
-        ANTHROPIC_BASE_URL: ${{ inputs.anthropic_base_url }}
-      with:
         anthropic_api_key: ${{ inputs.anthropic_api_key }}
         plugin_marketplaces: |
           https://github.com/anthropics/claude-code.git
@@ -118,11 +161,92 @@ runs:
         prompt: |
           /pr-review-toolkit:review-pr
           REPO: ${{ github.repository }}
-          PR NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+          PR NUMBER: ${{ steps.pr.outputs.number }}
 
           ${{ inputs.custom_prompt }}
 
           Post review results as a PR comment using `gh pr comment`.
         claude_args: |
+          --allowedTools "${{ inputs.allowed_tools }}"
+          ${{ inputs.claude_args }}
+
+    - name: Claude review (inline mode)
+      if: ${{ inputs.review_mode == 'inline' && steps.gate.outputs.run == 'true' }}
+      uses: anthropics/claude-code-action@v1
+      env:
+        ANTHROPIC_MODEL: ${{ inputs.anthropic_model }}
+        ANTHROPIC_BASE_URL: ${{ inputs.anthropic_base_url }}
+      with:
+        claude_code_oauth_token: ${{ inputs.claude_code_oauth_token }}
+        anthropic_api_key: ${{ inputs.anthropic_api_key }}
+        show_full_output: ${{ inputs.show_full_output }}
+        prompt: |
+          Review pull request #${{ steps.pr.outputs.number }} in ${{ github.repository }}
+          (head commit ${{ steps.diff.outputs.head_sha }}).
+
+          The full unified diff is saved at ./pr-review.diff — Read it. Do NOT
+          run git to fetch the diff; it is already there. Do NOT read
+          CLAUDE.md files for style/convention/naming — that is out of scope
+          (see below) and reading them wastes tokens. Read a specific
+          nested CLAUDE.md ONLY when a correctness finding hinges on that
+          module's domain semantics and you need to confirm it.
+
+          OUT OF SCOPE — do NOT review or flag these; other CI already
+          enforces them and any finding here is wasted tokens + noise:
+          formatting/prettier, eslint rules, import ordering, naming style,
+          generated files, lockfiles. Review only what a linter CANNOT catch:
+          logic/correctness, and material design/reuse/efficiency problems.
+
+          BAR FOR A FINDING — post only real defects. Every finding MUST
+          name a concrete wrong-behavior scenario: wrong output, crash,
+          data corruption, silent failure, or a genuine breakage. SKIP
+          nice-to-haves: "suboptimal", "could be cleaner/faster", "belongs
+          in service X", style/architecture preferences, and micro-optims
+          with no concrete failure. If the worst outcome is "slightly less
+          efficient" or "nicer design", DROP it.
+
+          RUN THE REVIEW WITH FOREGROUND SUBAGENTS. Every Task/Agent call MUST
+          pass run_in_background:false — launch it, WAIT for it to return, then
+          continue. NEVER end your turn while any agent is still running (a
+          backgrounded agent is killed when the job ends and its findings are
+          lost). Structure:
+            1. Finder agents (run one at a time, foreground): (a) correctness /
+               bugs, (b) reuse + simplification + efficiency. Each returns
+               candidates as {file, line, summary, failure_scenario}.
+               Skip anything in the OUT OF SCOPE list above.
+            2. For each candidate, a verifier agent (foreground) that tries to
+               REFUTE it. Drop the finding unless it survives.
+
+          COMMENT STYLE — terse, direct, caveman. No pleasantries, no
+          hedging, no praise, no restating the code. Speak like smart
+          caveman: drop articles/filler, fragments OK, technical terms
+          exact. Each comment ≤3 lines: what breaks, when, what to do.
+          Lead with a severity glyph + the fix as an imperative. Glyph:
+          🐛 for a bug (wrong output/crash/corruption), ⚠️ for a risk
+          (breaks only under a specific condition). Format:
+            🐛 **<problem>.** <failure scenario in one clause>.
+            Fix: <imperative action>.
+          Example — write:
+            🐛 **Token expiry use `<` not `<=`.** Token valid-at-exact-expiry
+            passes, then downstream 401s.
+            Fix: change to `now <= expiresAt`.
+          NOT: "I noticed that the token expiry check might potentially
+          cause issues because it uses a less-than comparison which could
+          lead to..." — kill that.
+
+          ${{ inputs.custom_prompt }}
+
+          Post each SURVIVING finding as an inline PR review comment:
+            gh api -X POST \
+              /repos/${{ github.repository }}/pulls/${{ steps.pr.outputs.number }}/comments \
+              -f body='<terse caveman finding per style above>' \
+              -f commit_id='${{ steps.diff.outputs.head_sha }}' \
+              -f path='<file>' -F line=<line> -f side=RIGHT
+          If ZERO findings survive, post exactly ONE comment instead:
+            gh pr comment ${{ steps.pr.outputs.number }} --body "✅ Claude review — nothing found."
+          Do not post any summary comment when there are findings.
+        claude_args: |
+          --effort ${{ inputs.effort }}
+          --max-turns ${{ inputs.max_turns }}
           --allowedTools "${{ inputs.allowed_tools }}"
           ${{ inputs.claude_args }}
