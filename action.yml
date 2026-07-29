@@ -103,7 +103,14 @@ runs:
     - name: Resolve PR number
       id: pr
       shell: bash
-      run: echo "number=${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+      env:
+        PR_NUMBER: ${{ inputs.pr_number || github.event.pull_request.number || github.event.issue.number }}
+      run: |
+        if [ -z "$PR_NUMBER" ]; then
+          echo "::error::No PR number: pass the pr_number input, or trigger from a pull_request/issue_comment event."
+          exit 1
+        fi
+        echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
     # inline mode: precompute the diff + head SHA so the model never runs git
     # to fetch the diff — denied-command flailing is the main cost driver.
