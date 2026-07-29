@@ -1,0 +1,47 @@
+# Inline review mode: finder/verifier subagents post terse inline PR review
+# comments. Diff is precomputed; auto-review skips diffs over max_diff_lines
+# (workflow_dispatch always runs).
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened]
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "pnpm-lock.yaml" # per-repo lockfile / generated files
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "PR number to review"
+        required: true
+        type: number
+      show_full_output:
+        description: "Log full Claude output to Actions"
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: stackbox-dev/claude-pr-reviewer@v2
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          review_mode: inline
+          pr_number: ${{ inputs.pr_number }}
+          show_full_output: ${{ inputs.show_full_output != false }}
+          custom_prompt: |
+            ALSO OUT OF SCOPE for this repo: <repo-specific noise, e.g.
+            migration SQL rules, generated api-clients, snapshot files>.
